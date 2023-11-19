@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Platform Game</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Prevent scrolling the webpage */
+            height: 100%;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            overflow: hidden; /* Ensure the video doesn't cause scroll bars */
+        }
+    
+        #gameVideo {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: auto;
+            height: auto;
+            min-width: 100%;
+            min-height: 100%;
+            transform: translate(-50%, -50%);
+            z-index: -1; /* Ensure it stays behind the canvas */
+        }
+    
+        canvas {
+            border: 1px solid black;
+            background-color: transparent;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1; /* Ensure it's above the video */
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <video autoplay muted loop id="gameVideo">
+            <source src="background_video.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+        
+        <!-- Scoreboard Toggle Link -->
+        <div style="position: absolute; top: 10px; left: 10px; z-index: 100;">
+            <a href="#" id="scoreboardLink" style="color: white; text-decoration: none;">Scoreboard</a>
+        </div>
+        <div id="scoreboard" style="display: none;">
+            <h2>Top 10 Scores</h2>
+            <ol id="scoreList">
+                <!-- Score items will be dynamically inserted here -->
+            </ol>
+            <button onclick="hideScoreboard()">Close Scoreboard</button>
+        </div>
+        
+        <!-- Game Canvas -->
+        <canvas id="gameCanvas"></canvas>
+    </div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        const dogImages = {
+            left: new Image(),
+            right: new Image(),
+            leftUp: new Image(),
+            rightUp: new Image(),
+            leftDown: new Image(),
+            rightDown: new Image()
+        };
+        dogImages.left.src = 'dog_left.png';
+        dogImages.right.src = 'dog_right.png';
+        dogImages.leftUp.src = 'dog_left_up.png';
+        dogImages.rightUp.src = 'dog_right_up.png';
+        dogImages.leftDown.src = 'dog_left_down.png';
+        dogImages.rightDown.src = 'dog_right_down.png';
+
+        const boneImage = new Image();
+        boneImage.src = 'dog_bone.png';
+
+        const player = {
+            x: 50,
+            y: 100,
+            width: 50,
+            height: 50,
+            velocityY: 0,
+            velocityX: 0,
+            gravity: 0.4,
+            jumpVelocity: -15,
+            doubleJumpVelocity: -20,
+            onGround: false,
+            moveSpeed: 5,
+            airMoveSpeed: 3,
+            lastJumpTime: 0,
+            doubleJumpTime: 200,
+            currentDirection: 'right',
+        };
+
+        let platforms = [];
+        let bones = [];
+        let score = 0;
+        let cameraX = 0;  // Camera position
+
+        // Example of platform definitions with movement types
+        platforms.push({
+            x: 50,
+            y: canvas.height - 100,
+            width: 200,
+            height: 20,
+            color: 'grey',
+            moveType: 'horizontal',
+            speedX: 2, // Horizontal speed
+            rangeX: 100 // Range of horizontal movement
+        });
+
+        platforms.push({
+            x: 300,
+            y: canvas.height - 200,
+            width: 200,
+            height: 20,
+            color: 'grey',
+            moveType: 'vertical',
+            speedY: 2, // Vertical speed
+            rangeY: 100 // Range of vertical movement
+        });
+
+        platforms.push({
+            x: 550,
+            y: canvas.height - 300,
+            width: 200,
+            height: 20,
+            color: 'grey',
+            moveType: 'both',
+            speedX: 2, // Horizontal speed
+            rangeX: 100, // Range of horizontal movement
+            speedY: 1, // Vertical speed
+            rangeY: 75 // Range of vertical movement
+        });
+
+        // Initialize the game with platforms and bones, and start the game loop
+        function initializeGame() {
+            // Initial platform
+            platforms.push({ x: 50, y: canvas.height - 100, width: 200, height: 20, color: 'grey' });
+            // Initial bone
+            bones.push({ x: 150, y: canvas.height - 150, width: 30, height: 20 });
+
+            // Wait for images to load before starting the game loop
+            let imagesLoaded = 0;
+            const totalImages = Object.keys(dogImages).length + 1; // +1 for the boneImage
+
+            function onImageLoad() {
+                imagesLoaded++;
+                if (imagesLoaded === totalImages) {
+                    updateGame(); // Start game loop when all images are loaded
+                }
+            }
+
+            Object.values(dogImages).forEach(image => {
+                image.onload = onImageLoad;
+            });
+
+            boneImage.onload = onImageLoad;
+        }
+
+        function findNearestPlatform() {
+            let nearestPlatform = null;
+            let nearestDistance = Infinity;
+
+            platforms.forEach(platform => {
+                const distance = Math.hypot(platform.x - player.x, platform.y - player.y);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestPlatform = platform;
+                }
+            });
+
+            return nearestPlatform;
+        }
+
+        let lineToPlatform = null;
+
+        function drawLineToPlatform() {
+            if (!lineToPlatform) return;
+
+            ctx.beginPath();
+            ctx.moveTo(player.x + player.width / 2, player.y);
+            ctx.lineTo(lineToPlatform.x + lineToPlatform.width / 2, lineToPlatform.y);
+            ctx.strokeStyle = "white";
+            ctx.stroke();
+        }
+
+        function pullDogToPlatform() {
+            if (!lineToPlatform) return;
+
+            // Calculate direction towards the platform
+            const directionX = lineToPlatform.x - player.x;
+            const directionY = lineToPlatform.y - player.y;
+
+            // Move the dog towards the platform
+            player.x += directionX * 0.1; // Adjust speed as needed
+            player.y += directionY * 0.1;
+
+            // Check if the dog has reached the platform
+            if (Math.abs(directionX) < 10 && Math.abs(directionY) < 10) {
+                lineToPlatform = null; // Clear the line
+                player.velocityY = 0;
+                player.onGround = true; // Set the dog on the platform
+            }
+        }
+
+        function updateMovingPlatforms() {
+            platforms.forEach((platform, index) => {
+                if (platform.moveType && !platform.initialized) {
+                    platform.initialX = platform.x;
+                    platform.initialY = platform.y;
+                    platform.moveDirectionX = 1;
+                    platform.moveDirectionY = 1;
+                    platform.initialized = true;
+                }
+                
+                switch (platform.moveType) {
+                    case 'horizontal':
+                        platform.x += platform.speedX * platform.moveDirectionX;
+                        if (Math.abs(platform.x - platform.initialX) >= platform.rangeX) {
+                            platform.moveDirectionX *= -1; // Change direction
+                        }
+                        break;
+                    case 'vertical':
+                        // Check if the platform would go below the fire pit after moving
+                        const potentialNewY = platform.y + (platform.speedY * platform.moveDirectionY);
+                        if (potentialNewY > canvas.height - firePit.height - platform.height) {
+                            // If so, set the platform right above the fire pit
+                            platform.y = canvas.height - firePit.height - platform.height;
+                            platform.moveDirectionY *= -1; // Change direction to move upwards again
+                        } else {
+                            // Perform the move if it's safe
+                            platform.y += platform.speedY * platform.moveDirectionY;
+                            if (Math.abs(platform.y - platform.initialY) >= platform.rangeY) {
+                                platform.moveDirectionY *= -1; // Change direction
+                            }
+                        }
+                        break;
+                    case 'both':
+                        // Horizontal movement
+                        platform.x += platform.speedX * platform.moveDirectionX;
+                        if (Math.abs(platform.x - platform.initialX) >= platform.rangeX) {
+                            platform.moveDirectionX *= -1; // Change direction
+                        }
+                        // Vertical movement
+                        const newPotentialY = platform.y + (platform.speedY * platform.moveDirectionY);
+                        if (newPotentialY > canvas.height - firePit.height - platform.height) {
+                            // If so, set the platform right above the fire pit
+                            platform.y = canvas.height - firePit.height - platform.height;
+                            platform.moveDirectionY *= -1; // Change direction to move upwards again
+                        } else {
+                            // Perform the move if it's safe
+                            platform.y += platform.speedY * platform.moveDirectionY;
+                            if (Math.abs(platform.y - platform.initialY) >= platform.rangeY) {
+                                platform.moveDirectionY *= -1; // Change direction
+                            }
+                        }
+                        break;
+                }
+            });
+        }
+
+        // Function to add platforms and bones dynamically
+        function addGameElements() {
+            const lastPlatform = platforms[platforms.length - 1];
+            if (!lastPlatform || lastPlatform.x - cameraX < canvas.width) {
+                let newX = lastPlatform ? lastPlatform.x + lastPlatform.width + 200 : 50;
+                let newY = getRandomY();
+
+                // Randomize the type of platform
+                const moveTypes = ['none', 'horizontal', 'vertical', 'both'];
+                const moveType = moveTypes[Math.floor(Math.random() * moveTypes.length)];
+
+                // Create the new platform object with properties based on the moveType
+                const newPlatform = {
+                    x: newX,
+                    y: newY,
+                    width: 200,
+                    height: 20,
+                    color: getRandomColor(),
+                    moveType: moveType,
+                    // Add speed and range properties if the platform moves
+                    ...(moveType !== 'none' && {
+                        speedX: moveType !== 'vertical' ? (1 + Math.random() * 2) * (Math.random() < 0.5 ? 1 : -1) : 0,
+                        rangeX: moveType !== 'vertical' ? 50 + Math.random() * 100 : 0,
+                        speedY: moveType !== 'horizontal' ? (1 + Math.random() * 2) * (Math.random() < 0.5 ? 1 : -1) : 0,
+                        rangeY: moveType !== 'horizontal' ? 30 + Math.random() * 70 : 0,
+                    }),
+                };
+
+                // Push the new platform onto the platforms array
+                platforms.push(newPlatform);
+
+                // Push a new bone to the bones array
+                bones.push({ x: newX + 100, y: newY - 50, width: 30, height: 20 });
+            }
+        }
+
+        function getRandomY() {
+            // Return a random Y position for the platform
+            return canvas.height - (50 + Math.random() * 200);  // Adjust range as needed
+        }
+
+        function getRandomColor() {
+            // Return a random color
+            const colors = ['brown', 'green', 'blue', 'pink', 'purple'];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        const firePit = {
+            y: canvas.height - 50,
+            height: 50,
+            color: 'transparent'
+        };
+
+        function checkBoneCollision() {
+            for (let i = 0; i < bones.length; i++) {
+                if (player.x < bones[i].x + bones[i].width &&
+                    player.x + player.width > bones[i].x &&
+                    player.y < bones[i].y + bones[i].height &&
+                    player.y + player.height > bones[i].y) {
+                    
+                    score++;
+                    bones.splice(i, 1);
+                    break;
+                }
+            }
+        }
+
+        function checkPlatformCollision() {
+            player.onGround = false;
+            for (let i = 0; i < platforms.length; i++) {
+                if (player.x < platforms[i].x + platforms[i].width &&
+                    player.x + player.width > platforms[i].x &&
+                    player.y < platforms[i].y + platforms[i].height &&
+                    player.y + player.height > platforms[i].y) {
+                    player.y = platforms[i].y - player.height;
+                    player.velocityY = 0;
+                    player.onGround = true;
+
+                    // If the platform is moving, we adjust the player's x and y position to match the platform's movement
+                    if (platforms[i].moveType === 'horizontal' || platforms[i].moveType === 'both') {
+                        player.x += platforms[i].speedX * platforms[i].moveDirectionX;
+                    }
+                    if (platforms[i].moveType === 'vertical' || platforms[i].moveType === 'both') {
+                        player.y += platforms[i].speedY * platforms[i].moveDirectionY;
+                    }
+
+                    // Ensure the dog lands on its feet
+                    if (player.currentDirection.includes('left')) {
+                        player.currentDirection = 'left';
+                    } else if (player.currentDirection.includes('right')) {
+                        player.currentDirection = 'right';
+                    }
+
+                    // If the dog has landed on a platform, remove the line
+                    if (lineToPlatform) {
+                        lineToPlatform = null;
+                    }
+
+                    break;
+                }
+            }
+            if (player.y + player.height > firePit.y) {
+                resetPlayer();
+            }
+        }
+
+        // Local Storage helper functions
+        function saveScores(scores) {
+            localStorage.setItem('highScores', JSON.stringify(scores));
+        }
+
+        function getHighScores() {
+            const scores = localStorage.getItem('highScores');
+            return scores ? JSON.parse(scores) : [];
+        }
+
+        // Scoreboard functions
+        function showScoreboard() {
+            const highScores = getHighScores();
+            const scoreListElement = document.getElementById('scoreList');
+            scoreListElement.innerHTML = ''; // Clear existing scores
+
+            highScores.forEach((score, index) => {
+                const scoreItem = document.createElement('li');
+                scoreItem.textContent = `${index + 1}. ${score.name}: ${score.score}`;
+                scoreListElement.appendChild(scoreItem);
+            });
+
+            document.getElementById('scoreboard').style.display = 'block';
+        }
+
+        function hideScoreboard() {
+            document.getElementById('scoreboard').style.display = 'none';
+        }
+
+        function checkHighScore(score) {
+            const highScores = getHighScores();
+
+            if (highScores.length < 10 || score > highScores[highScores.length - 1].score) {
+                const name = prompt('New high score! Enter your name:');
+                highScores.push({ score, name });
+                highScores.sort((a, b) => b.score - a.score);
+
+                if (highScores.length > 10) {
+                    highScores.pop(); // Remove the last element if longer than 10
+                }
+
+                saveScores(highScores);
+            }
+        }
+
+        // Event listeners
+        document.getElementById('scoreboardLink').addEventListener('click', function(event) {
+            event.preventDefault();
+            showScoreboard();
+        });
+
+        // Reset Player & Check for High Score
+        function resetPlayer() {
+            checkHighScore(score);
+
+            player.x = 50;
+            player.y = 100;
+            player.velocityY = 0;
+            player.velocityX = 0;
+            player.onGround = false;
+            player.currentDirection = 'right';
+
+            score = 0; // Reset score
+            platforms = []; // Clear platforms
+            bones = []; // Clear bones
+            initializePlatformsAndBones();
+        }
+
+        function initializePlatformsAndBones() {
+            // Initial platform
+            platforms.push({ x: 50, y: canvas.height - 100, width: 200, height: 20, color: 'grey' });
+            // Initial bone
+            bones.push({ x: 150, y: canvas.height - 150, width: 30, height: 20 });
+        }
+
+        function updateGame() {
+            requestAnimationFrame(updateGame);
+
+            // Update player velocity and position
+            player.velocityY += player.gravity;
+            player.y += player.velocityY;
+
+            if ((player.velocityX < 0 && player.x > 0) || player.velocityX > 0) {
+                player.x += player.velocityX;
+            }
+
+            // Update camera position with inertia
+            let targetCameraX = Math.max(player.x - canvas.width / 4, 0);  // Quarter of the canvas width
+            cameraX += (targetCameraX - cameraX) * 0.1;  // Inertia effect, adjust as needed
+
+            if (player.velocityY > 0 && !player.onGround) {
+                player.currentDirection = player.currentDirection.includes('left') ? 'leftDown' : 'rightDown';
+            }
+
+            pullDogToPlatform(); // Pull the dog towards the platform if the line is active
+
+            addGameElements();  // Dynamically add platforms and bones
+
+            checkPlatformCollision();
+            checkBoneCollision();
+            updateMovingPlatforms();
+
+            draw();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Apply camera translation
+            ctx.save();
+            ctx.translate(-cameraX, 0);
+
+            // Draw all game elements relative to the camera
+            platforms.forEach(platform => {
+                ctx.fillStyle = platform.color;
+                ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+            });
+
+            bones.forEach(bone => {
+                ctx.drawImage(boneImage, bone.x, bone.y, bone.width, bone.height);
+            });
+
+            ctx.drawImage(dogImages[player.currentDirection], player.x, player.y, player.width, player.height);
+
+            ctx.fillStyle = firePit.color;
+            ctx.fillRect(cameraX, firePit.y, canvas.width, firePit.height); // Notice the cameraX offset for the fire pit
+
+            drawLineToPlatform(); // Draw the line to the platform
+
+            // Restore the original state of the context
+            ctx.restore();
+
+            // Draw UI elements like score without camera translation
+            ctx.font = "20px Arial";
+            ctx.fillStyle = "white";
+            ctx.fillText("Score: " + score, canvas.width - 120, 30);
+        }
+
+        document.addEventListener('keydown', function(event) {
+            const key = event.key;
+            const currentTime = new Date().getTime();
+
+            switch (key) {
+                case 'ArrowLeft':
+                    player.velocityX = player.onGround ? -player.moveSpeed : -player.airMoveSpeed;
+                    player.currentDirection = player.onGround ? 'left' : 'leftUp'; // Change to 'leftUp' when in the air
+                    break;
+                case 'ArrowRight':
+                    player.velocityX = player.onGround ? player.moveSpeed : player.airMoveSpeed;
+                    player.currentDirection = player.onGround ? 'right' : 'rightUp'; // Change to 'rightUp' when in the air
+                    break;
+                case 'ArrowUp':
+                    if (player.onGround || currentTime - player.lastJumpTime <= player.doubleJumpTime) {
+                        player.velocityY = (currentTime - player.lastJumpTime <= player.doubleJumpTime) ? player.doubleJumpVelocity : player.jumpVelocity;
+                        player.onGround = false;
+                        player.currentDirection = player.currentDirection.includes('left') ? 'leftUp' : 'rightUp';
+                    }
+                    player.lastJumpTime = currentTime;
+                    break;
+            }
+        });
+
+        document.addEventListener('keyup', function(event) {
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                player.velocityX = 0;
+                // Change the image back to standing position
+                if (player.currentDirection.includes('left')) {
+                    player.currentDirection = 'left';
+                } else if (player.currentDirection.includes('right')) {
+                    player.currentDirection = 'right';
+                }
+            }
+        });
+
+        initializeGame();
+    </script>
+</body>
+</html>
