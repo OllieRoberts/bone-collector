@@ -143,14 +143,14 @@
             height: 50,
             velocityY: 0,
             velocityX: 0,
-            gravity: 0.4,
-            jumpVelocity: -15,
-            doubleJumpVelocity: -20,
+            gravity: 2,
+            jumpVelocity: -30,
+            doubleJumpVelocity: -40,
             onGround: false,
-            moveSpeed: 5,
-            airMoveSpeed: 3,
+            moveSpeed: 15,
+            airMoveSpeed: 10,
             lastJumpTime: 0,
-            doubleJumpTime: 200,
+            doubleJumpTime: 400,
             currentDirection: 'right',
         };
 
@@ -167,7 +167,7 @@
             height: 20,
             color: 'grey',
             moveType: 'horizontal',
-            speedX: 2, // Horizontal speed
+            speedX: 12, // Horizontal speed
             rangeX: 100 // Range of horizontal movement
         });
 
@@ -178,7 +178,7 @@
             height: 20,
             color: 'grey',
             moveType: 'vertical',
-            speedY: 2, // Vertical speed
+            speedY: 12, // Vertical speed
             rangeY: 100 // Range of vertical movement
         });
 
@@ -189,9 +189,9 @@
             height: 20,
             color: 'grey',
             moveType: 'both',
-            speedX: 2, // Horizontal speed
+            speedX: 12, // Horizontal speed
             rangeX: 100, // Range of horizontal movement
-            speedY: 1, // Vertical speed
+            speedY: 6, // Vertical speed
             rangeY: 75 // Range of vertical movement
         });
 
@@ -511,8 +511,16 @@
         const fps = 30;
         const fpsInterval = 1000 / fps;
 
-        function updateGame() {
+        let lastTime = 0;
+
+        function updateGame(time = 0) {
             requestAnimationFrame(updateGame);
+            const deltaTime = (time - lastTime) / 1000;
+            lastTime = time;
+
+            // Scale your physics calculations with deltaTime
+            player.velocityY += player.gravity * deltaTime;
+            player.y += player.velocityY * deltaTime;
 
             const currentTime = Date.now();
             const timeSinceLastRender = currentTime - lastRenderTime;
