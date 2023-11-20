@@ -507,8 +507,21 @@
             bones.push({ x: 150, y: canvas.height - 150, width: 30, height: 20 });
         }
 
+        let lastRenderTime = 0;
+        const fps = 30;
+        const fpsInterval = 1000 / fps;
+
         function updateGame() {
             requestAnimationFrame(updateGame);
+
+            const currentTime = Date.now();
+            const timeSinceLastRender = currentTime - lastRenderTime;
+
+            if (timeSinceLastRender < fpsInterval) {
+                return; // Skip the rest of the function if it's not time to draw yet
+            }
+
+            lastRenderTime = currentTime - (timeSinceLastRender % fpsInterval);
 
             // Update player velocity and position
             player.velocityY += player.gravity;
@@ -536,6 +549,8 @@
 
             draw();
         }
+
+        requestAnimationFrame(updateGame);
 
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
